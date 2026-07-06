@@ -63,7 +63,7 @@ class RunContext:
 def _normalize_run_dir(project_root: Path, value: Path) -> Path:
     path = value if value.is_absolute() else project_root / value
     parts = path.parts
-    if path.name in {"1_collect", "2_check", "3_generate"}:
+    if path.name in {"1_collect", "2_generate", "3_check", "2_check", "3_generate"}:
         return path.parent
     if len(parts) >= 2 and parts[-2] == "outputs" and path.name.startswith(("output_", "run_")):
         return path
@@ -90,7 +90,7 @@ def resolve_input_run_dir(project_root: Path, phase: str, input_run_dir_value: s
         )
     resolved = find_latest_run_dir_with_marker(
         project_root / "outputs",
-        Path("3_generate/data/generation_metadata.json"),
+        Path("2_generate/data/generation_metadata.json"),
     )
     if resolved is not None:
         return resolved
@@ -117,8 +117,8 @@ def create_run_context(
         ensure_dir(run_root)
 
     collect_root = run_root / "1_collect"
-    check_root = run_root / "2_check"
-    generate_root = run_root / "3_generate"
+    generate_root = run_root / "2_generate"
+    check_root = run_root / "3_check"
     paths = RunPaths(
         root=run_root,
         collect=collect_root,

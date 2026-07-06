@@ -63,7 +63,7 @@ def run_collect_phase(context, llm_client) -> None:
     searcher = SourceSearcher(context)
     scraper = ArticleScraper(context)
     source_filter = SourceFilter(context, llm_client)
-    research_builder = ResearchDocBuilder(context)
+    research_builder = ResearchDocBuilder(context, llm_client)
     template_collector = TemplateCollector(context, llm_client)
     style_analyzer = TemplateStyleAnalyzer(context, llm_client)
 
@@ -114,6 +114,7 @@ def run_collect_phase(context, llm_client) -> None:
             query_result=query_result,
             articles=extracted_articles,
         )
+        filtered_articles = research_builder.prepare_articles(topic, filtered_articles)
         all_filtered[topic] = filtered_articles
         _flush_collect_data(
             context,

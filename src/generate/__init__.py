@@ -1,28 +1,39 @@
 from __future__ import annotations
 
+from src.collect.article_scraper import ArticleScraper
+from src.collect.research_doc_builder import ResearchDocBuilder
+from src.collect.source_filter import SourceFilter
+from src.collect.source_searcher import SourceSearcher
 from src.common.file_utils import ensure_dir, load_json, save_json
 from src.generate.blog_generator import BlogGenerator
 from src.generate.docx_writer import BlogDocxWriter
+import shutil
+
+
+def _resolve_collect_dir(input_dir):
+    if (input_dir / "1_collect").exists():
+        return input_dir / "1_collect"
+    if (input_dir / "collect").exists():
+        return input_dir / "collect"
+    return input_dir
 
 
 def run_generate_phase(context, llm_client) -> None:
     context.set_phase("GENERATE")
     context.logger.info("GENERATE", "开始执行 generate 阶段")
     ensure_dir(context.paths.generate)
+    if context.paths.generated_blog_articles.exists():
+        shutil.rmtree(context.paths.generated_blog_articles)
     ensure_dir(context.paths.generated_blog_articles)
     ensure_dir(context.paths.generate / "data")
 
     input_dir = context.input_run_dir or context.paths.root
-    if (input_dir / "1_collect").exists():
-        collect_dir = input_dir / "1_collect"
-    elif (input_dir / "collect").exists():
-        collect_dir = input_dir / "collect"
-    else:
-        collect_dir = input_dir
+    collect_dir = _resolve_collect_dir(input_dir)
     collect_data_dir = collect_dir / "data"
     selected_topics = load_json(collect_data_dir / "selected_topics.json", default=[])
     extracted_articles = load_json(collect_data_dir / "filtered_sources.json", default={})
     template_profiles = load_json(collect_data_dir / "template_style_profiles.json", default={})
+    generated_queries = load_json(collect_data_dir / "generated_queries.json", default={})
 
     if not selected_topics:
         context.action_manager.require_and_raise(
@@ -40,12 +51,30 @@ def run_generate_phase(context, llm_client) -> None:
     writer = BlogDocxWriter(context)
     generation_metadata = {"articles": []}
 
+    searcher = SourceSearcher(context)
+    scraper = ArticleScraper(context)
+    source_filter = SourceFilter(context, llm_client)
+    research_builder = ResearchDocBuilder(context, llm_client)
+
     for topic_info in selected_topics:
         topic = topic_info["topic"]
         context.set_topic(topic)
+        context.set_topic_category(topic_info.get("category", ""))
         profile = template_profiles.get(topic, {})
+        query_result = generated_queries.get(topic, {"queries": {}})
         articles = extracted_articles.get(topic, [])
-        article_payload = generator.generate(topic=topic, style_profile=profile, sources=articles)
+        article_payload, updated_sources = generator.generate(
+            topic=topic,
+            style_profile=profile,
+            sources=articles,
+            query_result=query_result,
+            searcher=searcher,
+            scraper=scraper,
+            source_filter=source_filter,
+            research_builder=research_builder,
+        )
+        if updated_sources is not None:
+            extracted_articles[topic] = updated_sources
         output_path = writer.write(article_payload)
         context.record_file(output_path)
         article_payload["output_path"] = str(output_path)

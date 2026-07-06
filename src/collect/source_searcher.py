@@ -102,10 +102,12 @@ class SourceSearcher:
         self, topic: str, grouped_queries: dict[str, list[str]], seen_urls: set[str]
     ) -> list[dict]:
         results: list[dict] = []
+        consecutive_timeouts = 0
         for category, query in self._iter_queries(grouped_queries):
             try:
                 self.context.logger.info("COLLECT", f"正在搜索：{query}")
                 html = self._fetch_duckduckgo_html(query)
+                consecutive_timeouts = 0
                 if self._looks_like_duckduckgo_challenge(html):
                     self.context.logger.warning(
                         "COLLECT",
@@ -133,16 +135,23 @@ class SourceSearcher:
                     )
             except Exception as exc:
                 self.context.logger.warning("COLLECT", f"搜索失败：{query}，原因：{exc}")
+                if self._is_timeout_error(exc):
+                    consecutive_timeouts += 1
+                    if consecutive_timeouts >= 2:
+                        self.context.logger.warning("COLLECT", "DuckDuckGo 连续超时，提前结束本轮公开搜索")
+                        break
         return results
 
     def _search_with_yahoo_html(
         self, topic: str, grouped_queries: dict[str, list[str]], seen_urls: set[str]
     ) -> list[dict]:
         results: list[dict] = []
+        consecutive_timeouts = 0
         for category, query in self._iter_queries(grouped_queries):
             try:
                 self.context.logger.info("COLLECT", f"正在使用 Yahoo 搜索：{query}")
                 html = self._fetch_yahoo_html(query)
+                consecutive_timeouts = 0
                 items = self._parse_yahoo_results(html)
                 for item in items:
                     url = item.get("url", "")
@@ -164,6 +173,11 @@ class SourceSearcher:
                     )
             except Exception as exc:
                 self.context.logger.warning("COLLECT", f"Yahoo 搜索失败：{query}，原因：{exc}")
+                if self._is_timeout_error(exc):
+                    consecutive_timeouts += 1
+                    if consecutive_timeouts >= 2:
+                        self.context.logger.warning("COLLECT", "Yahoo 连续超时，提前结束本轮公开搜索")
+                        break
         return results
 
     def _fetch_duckduckgo_html(self, query: str) -> str:
@@ -230,8 +244,13 @@ class SourceSearcher:
 
     def _search_with_seed_sources(self, topic: str) -> list[dict]:
         results: list[dict] = []
-        for seed in self.context.settings.seed_sources[:6]:
+        seen_domains: set[str] = set()
+        consecutive_timeouts = 0
+        for seed in self.context.settings.seed_sources:
             domain = _extract_domain(seed)
+            if not domain or domain in seen_domains:
+                continue
+            seen_domains.add(domain)
             query = f"site:{domain} {topic}"
             try:
                 self.context.logger.info("COLLECT", f"正在固定来源搜索：{query}")
@@ -250,8 +269,16 @@ class SourceSearcher:
                             "method": "seed_source_search",
                         }
                     )
+                consecutive_timeouts = 0
             except Exception as exc:
                 self.context.logger.warning("COLLECT", f"固定来源搜索失败：{query}，原因：{exc}")
+                if self._is_timeout_error(exc):
+                    consecutive_timeouts += 1
+                    if consecutive_timeouts >= 2:
+                        self.context.logger.warning("COLLECT", "固定来源搜索连续超时，结束本轮兜底搜索")
+                        break
+            if len(seen_domains) >= 4:
+                break
         return results
 
     def _search_seed_query(self, query: str) -> list[dict]:
@@ -307,3 +334,6 @@ class SourceSearcher:
                 return response.status < 400
         except Exception:
             return False
+
+    def _is_timeout_error(self, exc: Exception) -> bool:
+        return "timed out" in str(exc).lower()

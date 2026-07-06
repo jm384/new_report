@@ -6,7 +6,9 @@ import re
 
 
 CHINESE_CHAR_PATTERN = re.compile(r"[\u4e00-\u9fff]")
-HEADING_PATTERN = re.compile(r"^(一|二|三|四|五|六|七|八|九|十|[0-9]+)[、.．]|^#+\s*")
+HEADING_PATTERN = re.compile(
+    r"^(一|二|三|四|五|六|七|八|九|十|[0-9]+)[、.．]|^(第[一二三四五六七八九十0-9]+(部分|点|步|章|节)?[：:、.]?)|^(首先|其次|再次|最后|另外|还有)[：:，,]?|^#+\s*"
+)
 
 
 def normalize_whitespace(text: str) -> str:
@@ -14,6 +16,10 @@ def normalize_whitespace(text: str) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def contains_chinese(text: str) -> bool:
+    return bool(CHINESE_CHAR_PATTERN.search(text or ""))
 
 
 def split_paragraphs(text: str) -> list[str]:
