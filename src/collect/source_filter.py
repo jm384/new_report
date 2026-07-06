@@ -26,6 +26,11 @@ OFFICIAL_SOURCE_HINTS = [
     "nycbar.org",
 ]
 
+HARD_DROP_REASONS = {
+    "fetch_failed",
+    "content_too_short",
+}
+
 
 class SourceFilter:
     def __init__(self, context, llm_client) -> None:
@@ -73,7 +78,9 @@ class SourceFilter:
         for article in ordered_articles:
             url = article.get("url", "")
             rule_decision = self._evaluate_with_rules(topic, article)
-            if url in decisions_by_url:
+            if self._is_hard_drop(rule_decision):
+                decision = rule_decision
+            elif url in decisions_by_url:
                 decision = decisions_by_url[url]
             else:
                 decision = rule_decision
@@ -116,6 +123,11 @@ class SourceFilter:
         kept = kept[: self.context.settings.search.max_articles_per_topic]
         self.context.logger.info("COLLECT", f"主题“{topic}”保留高质量链接 {len(kept)} 条")
         return kept
+
+    def _is_hard_drop(self, decision: dict) -> bool:
+        if not decision:
+            return False
+        return decision.get("keep_or_drop") == "drop" and decision.get("drop_reason") in HARD_DROP_REASONS
 
     def _evaluate_with_rules(self, topic: str, article: dict) -> dict:
         title = (article.get("title") or "").strip()
