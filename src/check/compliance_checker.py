@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from src.common.text_utils import contains_any
-
 
 class ComplianceChecker:
     def __init__(self, context) -> None:
@@ -9,12 +7,12 @@ class ComplianceChecker:
 
     def check(self, article: dict) -> dict:
         text = article.get("text", "")
-        hits = contains_any(text, self.context.settings.banned_marketing_phrases)
-        self.context.logger.info(
-            "CHECK",
-            f"是否发现夸大承诺表达：{'是' if hits else '否'}",
-        )
+        issues = []
+        if "绝对" in text and "保证" in text:
+            issues.append("存在过强承诺")
+        if "一定胜诉" in text or "必胜" in text:
+            issues.append("存在夸大承诺")
         return {
-            "banned_hits": hits,
-            "has_risk": bool(hits),
+            "has_problem": bool(issues),
+            "issues": issues,
         }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from src.common.docx_utils import write_sections_docx
 from src.common.file_utils import sanitize_filename
+from src.common.text_utils import normalize_whitespace
 
 
 class ResearchDocBuilder:
@@ -12,56 +13,37 @@ class ResearchDocBuilder:
         sections: list[tuple[str, list[str]]] = []
         sections.append(
             (
-                "一、当前主题说明",
+                "一、主题信息",
                 [
                     f"主题：{topic}",
                     f"主题类别：{self.context.current_topic_category or '未分类'}",
-                    "本文件用于汇总当前主题的搜索词、采集来源、采集源数据摘录和写作参考。",
                 ],
             )
         )
 
-        query_lines = []
+        query_lines: list[str] = []
         for category, queries in query_result["queries"].items():
             query_lines.append(f"{category}：")
-            query_lines.extend([f"1. {query}" for query in queries])
-        sections.append(("二、搜索词记录", query_lines or ["未记录到搜索词。"]))
-
-        article_lines: list[str] = []
-        for index, article in enumerate(articles, start=1):
-            decision = article.get("filter_decision", {})
-            article_lines.extend(
-                [
-                    f"{index}. 标题：{article.get('title', '')}",
-                    f"   来源站点：{article.get('source_site', '')}",
-                    f"   采集方式：{article.get('method', '') or '未记录'}",
-                    f"   搜索词：{article.get('search_query', '') or '未记录'}",
-                    f"   抓取时间：{article.get('fetch_time', '') or '未记录'}",
-                    f"   发布时间：{article.get('published_at', '') or '未提取到'}",
-                    f"   URL：{article.get('url', '')}",
-                    f"   相关性评分：{decision.get('relevance_score', '')}",
-                    f"   保留原因：{decision.get('reason', '')}",
-                ]
-            )
-        sections.append(("三、采集链接清单", article_lines or ["未保留有效采集链接。"]))
-
-        summary_lines: list[str] = []
-        for index, article in enumerate(articles, start=1):
-            content = article.get("content", "")
-            summary_lines.extend(
-                [
-                    f"{index}. {article.get('title', '')}",
-                    f"   摘要：{article.get('summary', '') or '未生成摘要'}",
-                    f"   写作要点：{self._build_takeaways(topic, content)}",
-                    f"   术语提示：{self._extract_terms(content)}",
-                ]
-            )
-        sections.append(("四、素材要点提炼", summary_lines or ["未提炼到素材要点。"]))
+            query_lines.extend([f"- {query}" for query in queries])
+        sections.append(("二、搜索词", query_lines or ["未记录到搜索词"]))
 
         source_lines: list[str] = []
-        for index, article in enumerate(articles, start=1):
-            source_lines.extend(self._build_source_excerpt_lines(index, article))
-        sections.append(("五、采集源数据", source_lines or ["未采集到可展示的源数据。"]))
+        for article in articles:
+            decision = article.get("filter_decision", {})
+            title = self._display_title(article)
+            summary = self._display_summary(article)
+            search_query = self._display_search_query(article.get("search_query", ""))
+            score = decision.get("relevance_score", "")
+
+            source_lines.append(f"标题：{title}")
+            source_lines.append(f"链接：{article.get('url', '')}")
+            source_lines.append(f"简要概要：{summary}")
+            source_lines.append(f"搜索词：{search_query}")
+            if score != "":
+                source_lines.append(f"相关性评分：{score}")
+            source_lines.append("")
+
+        sections.append(("三、采集链接", source_lines or ["未采集到可用链接"]))
 
         path = self.context.paths.topic_research_docs / f"{sanitize_filename(topic)}_主题采集文档.docx"
         title = f"主题采集文档：{topic}"
@@ -69,48 +51,27 @@ class ResearchDocBuilder:
         self.context.logger.info("COLLECT", f"主题采集文档保存路径：{path}")
         return path
 
-    def _build_source_excerpt_lines(self, index: int, article: dict) -> list[str]:
-        content = (article.get("content") or "").strip()
-        excerpt = self._truncate_text(content, limit=1200)
-        if not excerpt:
-            excerpt = "未采集到正文内容。"
-        return [
-            f"{index}. 源标题：{article.get('title', '')}",
-            f"   源 URL：{article.get('url', '')}",
-            f"   正文长度：{len(content)}",
-            f"   正文摘录：{excerpt}",
-        ]
+    def _display_title(self, article: dict) -> str:
+        title = normalize_whitespace(article.get("title", "") or "")
+        url = (article.get("url", "") or "").strip()
+        if not title or title == url:
+            return url
+        return title
 
-    def _truncate_text(self, text: str, limit: int) -> str:
-        compact = " ".join(text.split())
-        if len(compact) <= limit:
-            return compact
-        return compact[:limit].rstrip() + "..."
+    def _display_summary(self, article: dict) -> str:
+        summary = normalize_whitespace(article.get("summary", "") or "")
+        if summary and summary not in {"手动补充来源", "兜底来源"}:
+            return summary
+        return self._simple_summary(article.get("content", ""))
 
-    def _build_takeaways(self, topic: str, content: str) -> str:
-        points = []
-        lowered = content.lower()
-        if "insurance" in lowered or "保险" in content:
-            points.append("可用于解释理赔流程或通知要求。")
-        if "safety" in lowered or "安全" in content:
-            points.append("可用于补充安全提醒。")
-        if "court" in lowered or "责任" in content:
-            points.append("可用于解释责任认定和证据保留。")
-        if not points:
-            points.append(f"可作为“{topic}”背景资料和风险提示的补充。")
-        return " ".join(points)
+    def _display_search_query(self, value: str) -> str:
+        cleaned = normalize_whitespace(value or "")
+        if cleaned in {"MANUAL_URL", "FALLBACK_MANUAL_URL"}:
+            return "手动补充来源"
+        return cleaned or "未记录"
 
-    def _extract_terms(self, content: str) -> str:
-        terms = []
-        term_map = {
-            "premises liability": "场所责任",
-            "no-fault": "无过错保险",
-            "negligence": "过失",
-            "liability": "责任",
-            "claim": "索赔",
-        }
-        lowered = content.lower()
-        for en, zh in term_map.items():
-            if en in lowered:
-                terms.append(f"{en}（{zh}）")
-        return "、".join(terms) if terms else "未提取到明显术语"
+    def _simple_summary(self, content: str) -> str:
+        compact = normalize_whitespace(" ".join((content or "").split()))
+        if not compact:
+            return "未提取到可用概要"
+        return compact[:220] + ("..." if len(compact) > 220 else "")

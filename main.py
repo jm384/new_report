@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--input-run-dir",
         default="",
-        help="单独运行 generate/check 时读取的历史 outputs/output_* 目录",
+        help="单独运行 generate/check 时读取的历史 outputs/output_* 主目录",
     )
     parser.add_argument(
         "--seed",

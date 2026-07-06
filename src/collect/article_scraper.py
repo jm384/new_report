@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 import re
-from urllib.request import Request, urlopen
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from src.common.text_utils import normalize_whitespace
 
@@ -30,10 +30,11 @@ class ArticleScraper:
             try:
                 html = self._fetch_html(url)
                 text = self._extract_text(html, url)
+                extracted_title = self._extract_title(html)
                 article["status"] = "ok"
                 article["content"] = text
-                article["title"] = article.get("title") or self._extract_title(html)
-                article["summary"] = article.get("snippet") or text[:180]
+                article["title"] = self._choose_title(article, extracted_title, url)
+                article["summary"] = self._build_summary(article, text)
                 article["published_at"] = self._extract_published_at(html)
                 self.context.logger.info(
                     "COLLECT",
@@ -132,3 +133,38 @@ class ArticleScraper:
             if matched:
                 return normalize_whitespace(matched.group(1))
         return ""
+
+    def _choose_title(self, article: dict, extracted_title: str, url: str) -> str:
+        current_title = normalize_whitespace(article.get("title", "") or "")
+        extracted_title = normalize_whitespace(extracted_title or "")
+        if extracted_title and not self._looks_like_placeholder_title(extracted_title, url):
+            return extracted_title
+        if current_title and not self._looks_like_placeholder_title(current_title, url):
+            return current_title
+        return url
+
+    def _build_summary(self, article: dict, text: str) -> str:
+        snippet = normalize_whitespace(article.get("snippet", "") or "")
+        if snippet and not self._looks_like_placeholder_text(snippet):
+            return snippet[:220] + ("..." if len(snippet) > 220 else "")
+        compact = normalize_whitespace(text or "")
+        if not compact:
+            return "未提取到可用概要"
+        return compact[:220] + ("..." if len(compact) > 220 else "")
+
+    def _looks_like_placeholder_title(self, title: str, url: str) -> bool:
+        lowered = (title or "").strip().lower()
+        return not lowered or lowered == url.strip().lower() or lowered in {
+            "未提取到标题",
+            "手动补充来源",
+            "兜底来源",
+        }
+
+    def _looks_like_placeholder_text(self, text: str) -> bool:
+        lowered = (text or "").strip().lower()
+        return lowered in {
+            "手动补充来源",
+            "兜底来源",
+            "manual_url",
+            "fallback_manual_url",
+        }

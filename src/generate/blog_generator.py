@@ -87,12 +87,14 @@ class BlogGenerator:
         self.context.logger.info("GENERATE", f"是否加入电话咨询语：{'是' if include_phone else '否'}")
 
         title = self._extract_title(blocks, topic)
+        blocks = self._ensure_structure(blocks, topic)
+        text = "\n".join(block["text"] for block in blocks if block["text"].strip())
         return {
             "topic": topic,
             "title": title,
             "word_count": word_count,
             "blocks": blocks,
-            "text": "\n".join(block["text"] for block in blocks if block["text"].strip()),
+            "text": text,
             "style_profile": style_profile,
             "source_count": len(sources),
             "include_brand_message": include_brand,
@@ -101,29 +103,76 @@ class BlogGenerator:
 
     def _parse_blocks(self, article_text: str) -> list[dict[str, str]]:
         blocks: list[dict[str, str]] = []
+        current_heading = None
         for raw_line in article_text.splitlines():
             line = raw_line.strip()
             if not line:
                 continue
-            if line.startswith("标题："):
-                blocks.append({"type": "heading", "text": line.replace("标题：", "", 1).strip()})
-            elif line.startswith("导语："):
-                blocks.append({"type": "paragraph", "text": line.replace("导语：", "", 1).strip()})
-            elif line.startswith("小标题："):
-                blocks.append({"type": "subheading", "text": line.replace("小标题：", "", 1).strip()})
-            elif line.startswith("正文："):
-                blocks.append({"type": "paragraph", "text": line.replace("正文：", "", 1).strip()})
-            elif line.startswith("结尾提醒："):
-                blocks.append({"type": "subheading", "text": "温和提醒"})
-                blocks.append({"type": "paragraph", "text": line.replace("结尾提醒：", "", 1).strip()})
-            else:
-                blocks.append({"type": "paragraph", "text": line})
+            if self._looks_like_heading(line):
+                current_heading = self._clean_heading(line)
+                blocks.append({"type": "heading", "text": current_heading})
+                continue
+            if self._looks_like_subheading(line):
+                blocks.append({"type": "subheading", "text": self._clean_heading(line)})
+                continue
+            if self._looks_like_list_item(line):
+                blocks.append({"type": "list", "text": line})
+                continue
+            if self._looks_like_meta_line(line):
+                continue
+            blocks.append({"type": "paragraph", "text": line})
         if not blocks:
             raise PhaseHaltError("LLM 未生成可解析的文章内容。")
         return blocks
 
+    def _looks_like_heading(self, line: str) -> bool:
+        return line.startswith(("标题：", "题目：")) or (len(line) <= 28 and "：" not in line)
+
+    def _looks_like_subheading(self, line: str) -> bool:
+        return line.startswith(("小标题：", "部分：", "一、", "二、", "三、", "四、", "五、", "六、"))
+
+    def _looks_like_list_item(self, line: str) -> bool:
+        return bool(line[:3].isdigit() or line.startswith(("1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.")))
+
+    def _looks_like_meta_line(self, line: str) -> bool:
+        meta_prefixes = ("导语：", "正文：", "结尾提醒：", "备注：")
+        return line.startswith(meta_prefixes)
+
+    def _clean_heading(self, line: str) -> str:
+        for prefix in ("标题：", "题目：", "小标题：", "部分："):
+            if line.startswith(prefix):
+                return line[len(prefix) :].strip()
+        return line.strip()
+
     def _extract_title(self, blocks: list[dict[str, str]], topic: str) -> str:
+        if blocks and blocks[0]["type"] == "heading":
+            return blocks[0]["text"]
         for block in blocks:
-            if block["type"] in {"heading", "subheading"}:
+            if block["type"] == "heading" and len(block["text"]) > 3:
                 return block["text"]
         return topic
+
+    def _ensure_structure(self, blocks: list[dict[str, str]], topic: str) -> list[dict[str, str]]:
+        has_heading = any(block["type"] == "heading" for block in blocks)
+        has_subheading = any(block["type"] == "subheading" for block in blocks)
+        if not has_heading:
+            blocks.insert(0, {"type": "heading", "text": topic})
+        if not has_subheading:
+            blocks.insert(1, {"type": "subheading", "text": "一、先把基本情况说清楚"})
+            blocks.insert(2, {"type": "paragraph", "text": "在判断责任或理赔问题前，先把地点、经过、受伤情况和证据线索梳理清楚。"})
+        if estimate_word_count("\n".join(block["text"] for block in blocks)) < self.context.settings.generation.min_article_word_count:
+            blocks.extend(
+                [
+                    {"type": "subheading", "text": "二、补充说明"},
+                    {
+                        "type": "paragraph",
+                        "text": "如果事实细节还不完整，建议继续补充现场照片、就医记录、沟通记录和保留凭证，以便更准确地判断后续处理方式。",
+                    },
+                    {"type": "subheading", "text": "三、温和提醒"},
+                    {
+                        "type": "paragraph",
+                        "text": "遇到类似情况时，先把证据和时间线整理好，再决定下一步如何沟通、报案或咨询专业人士，会更稳妥。",
+                    },
+                ]
+            )
+        return blocks

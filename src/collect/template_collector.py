@@ -32,15 +32,17 @@ class TemplateCollector:
 
         viable_count = self.context.settings.template_min_viable_count
         target_count = self.context.settings.template_min_count
-        if len(files) < viable_count:
+        if len(files) == viable_count:
+            self.context.logger.info("COLLECT", "模板数量达到最低可行值 3 篇，本轮继续后续分析")
+        elif len(files) < viable_count:
             self.context.logger.warning(
                 "COLLECT",
-                f"模板不足最低可行值 {viable_count} 篇，但仍继续记录质量信息。",
+                f"模板不足最低可行值 {viable_count} 篇，后续风格分析质量可能受影响",
             )
-        if len(files) < target_count:
+        elif len(files) < target_count:
             self.context.logger.warning(
                 "COLLECT",
-                f"模板数量仅有 {len(files)} 篇，低于理想目标 {target_count} 篇，但不终止采集。",
+                f"模板数量为 {len(files)} 篇，低于理想目标 {target_count} 篇，但不影响本轮继续",
             )
 
         payload = {
@@ -82,10 +84,7 @@ class TemplateCollector:
             len(current_files) >= self.context.settings.template_min_viable_count
             and self.context.settings.search.template_bootstrap_skip_remote_if_viable
         ):
-            self.context.logger.info(
-                "COLLECT",
-                "模板数量已达到最低可行值，跳过��程模板采集以节省配额。",
-            )
+            self.context.logger.info("COLLECT", "模板已达到最低可行值，跳过远程模板采集以节省配额")
             return
         if self.context.settings.search.template_bootstrap_remote_enabled:
             self._collect_remote_templates(template_root, topic)
@@ -95,26 +94,22 @@ class TemplateCollector:
         self._generate_seed_templates(
             template_root,
             topic,
-            missing=max(
-                0,
-                self.context.settings.template_min_viable_count - len(current_files),
-            ),
+            missing=max(0, self.context.settings.template_min_viable_count - len(current_files)),
         )
 
     def _collect_remote_templates(self, template_root: Path, topic: str) -> None:
         try:
             from duckduckgo_search import DDGS  # type: ignore
         except ImportError:
-            self.context.logger.warning("COLLECT", "duckduckgo_search 未安装，跳过远程模板采集。")
+            self.context.logger.warning("COLLECT", "duckduckgo_search 未安装，跳过远程模板采集")
             return
 
         queries = [
-            f"{topic} 中文 律师 博客 纽约",
+            f"{topic} 中文 律师 博客 文章",
             "纽约 华人 律师 中文 博客 车祸 理赔",
             "纽约 华人 律师 中文 博客 滑倒 受伤",
             "纽约 华人 律师 中文 博客 房东 责任",
             "纽约 华人 律师 中文 博客 工地 事故",
-            "纽约 华人 律师 中文 博客 误诊",
         ]
         ddgs = DDGS()
         seen_urls: set[str] = set()
@@ -144,7 +139,7 @@ class TemplateCollector:
         if missing <= 0:
             return
         if not self.llm_client.is_configured:
-            self.context.logger.warning("COLLECT", "LLM 不可用，无法生成起步模板。")
+            self.context.logger.warning("COLLECT", "LLM 不可用，无法生成种子模板")
             return
 
         seed_topics = [
@@ -167,37 +162,36 @@ class TemplateCollector:
             if path.exists():
                 continue
             prompt = f"""
-请写一篇中文法律科普博客模板文章，用于纽约州华人律师事务所博客风格分析。
+请写一篇中文法律科普博客模板文章，用于中文律师事务所博客风格分析。
 主题：{seed_topic}
+
 要求：
-1. 使用温和标题
-2. 语言自然顺畅
-3. 包含 4 个左右小标题
-4. 语气亲切、专业、稳重
-5. 避免夸大承诺
-6. 900-1400 字
-7. 只输出正文，不要解释
+1. 使用自然、完整、可发布的文章结构。
+2. 包含标题、导语、4 到 5 个小标题、结尾提醒。
+3. 语言要顺畅、温和、专业，不要夸大承诺。
+4. 字数控制在 900 到 1400 字。
+5. 只输出文章正文，不要解释。
 """.strip()
             try:
                 content = self.llm_client.generate_text(
                     phase="COLLECT",
-                    purpose="起步模板生成",
+                    purpose="种子模板生成",
                     prompt=prompt,
-                    system_prompt="你是中文法律科普博客模板生成助手。",
+                    system_prompt="你是中文法律科普博客模板写作助手。",
                     temperature=0.7,
                 )
                 path.write_text(content, encoding="utf-8")
-                self.context.logger.info("COLLECT", f"已生成起步模板：{path.name}")
+                self.context.logger.info("COLLECT", f"已生成种子模板：{path.name}")
                 created += 1
             except LLMQuotaExceededError as exc:
                 self.last_bootstrap_hit_quota = True
                 self.context.logger.warning(
                     "COLLECT",
-                    f"生成起步模板时遇到配额不足，停止继续补模板：{exc}",
+                    f"生成种子模板时遇到配额不足，停止继续补模板：{exc}",
                 )
                 return
             except Exception as exc:
-                self.context.logger.warning("COLLECT", f"生成起步模板失败：{seed_topic}，原因：{exc}")
+                self.context.logger.warning("COLLECT", f"生成种子模板失败：{seed_topic}，原因：{exc}")
                 break
 
     def _fetch_article_text(self, url: str) -> str:
@@ -242,17 +236,13 @@ class TemplateCollector:
                 if target.exists():
                     continue
                 path.replace(target)
-                self.context.logger.info(
-                    "COLLECT",
-                    f"已将历史模板迁移到分类目录：{target}",
-                )
+                self.context.logger.info("COLLECT", f"已将历史模板迁移到分类目录：{target}")
 
     def _find_template_files(self, template_root: Path) -> list[Path]:
         files: list[Path] = []
         for ext in ("*.docx", "*.txt", "*.md"):
             files.extend(template_root.rglob(ext))
-        valid_files = [path for path in sorted(files) if self._is_viable_template(path)]
-        return valid_files
+        return [path for path in sorted(files) if self._is_viable_template(path)]
 
     def _is_viable_template(self, path: Path) -> bool:
         try:

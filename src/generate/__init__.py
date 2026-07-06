@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from src.common.file_utils import ensure_dir, load_json, save_json
 from src.generate.blog_generator import BlogGenerator
 from src.generate.docx_writer import BlogDocxWriter
@@ -15,23 +13,23 @@ def run_generate_phase(context, llm_client) -> None:
     ensure_dir(context.paths.generate / "data")
 
     input_dir = context.input_run_dir or context.paths.root
-    collect_dir = input_dir / "collect" if (input_dir / "collect").exists() else input_dir
+    if (input_dir / "1_collect").exists():
+        collect_dir = input_dir / "1_collect"
+    elif (input_dir / "collect").exists():
+        collect_dir = input_dir / "collect"
+    else:
+        collect_dir = input_dir
     collect_data_dir = collect_dir / "data"
     selected_topics = load_json(collect_data_dir / "selected_topics.json", default=[])
     extracted_articles = load_json(collect_data_dir / "filtered_sources.json", default={})
     template_profiles = load_json(collect_data_dir / "template_style_profiles.json", default={})
-    if not selected_topics and input_dir != context.paths.root:
-        fallback_dir = context.paths.root / "collect" / "data"
-        selected_topics = load_json(fallback_dir / "selected_topics.json", default=[])
-        extracted_articles = load_json(fallback_dir / "filtered_sources.json", default={})
-        template_profiles = load_json(fallback_dir / "template_style_profiles.json", default={})
 
     if not selected_topics:
         context.action_manager.require_and_raise(
             phase="GENERATE",
             topic="生成阶段",
             problem="未找到 selected_topics.json，无法确定要生成哪些主题。",
-            attempted_actions=["读取输入目录中的 collect/data/selected_topics.json"],
+            attempted_actions=["读取输入目录中的 1_collect/data/selected_topics.json"],
             cannot_continue_reason="缺少 collect 阶段产物，无法继续生成文章。",
             user_actions=["请先运行 python main.py --phase collect。"],
             suggested_materials=["collect 阶段输出目录"],

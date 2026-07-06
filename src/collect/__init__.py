@@ -10,13 +10,32 @@ from src.collect.template_style_analyzer import TemplateStyleAnalyzer
 from src.collect.topic_selector import TopicSelector
 from src.common.docx_utils import DocxDependencyError
 from src.common.file_utils import save_json
+from src.common.text_utils import normalize_whitespace
+
+
+INTERNAL_QUERY_MARKERS = {"MANUAL_URL", "FALLBACK_MANUAL_URL"}
+
+
+def _normalize_article_for_output(article: dict) -> dict:
+    normalized = dict(article)
+    raw_query = normalize_whitespace(normalized.get("search_query", "") or "")
+    if raw_query in INTERNAL_QUERY_MARKERS:
+        normalized["search_query"] = "手动补充来源"
+    return normalized
+
+
+def _normalize_filtered_payload(filtered: dict) -> dict:
+    normalized: dict = {}
+    for topic, articles in filtered.items():
+        normalized[topic] = [_normalize_article_for_output(article) for article in articles]
+    return normalized
 
 
 def _flush_collect_data(context, *, queries, raw_results, filtered, extracted, styles) -> None:
     payloads = {
         "generated_queries.json": queries,
         "raw_search_results.json": raw_results,
-        "filtered_sources.json": filtered,
+        "filtered_sources.json": _normalize_filtered_payload(filtered),
         "extracted_articles.json": extracted,
         "template_style_profiles.json": styles,
     }
@@ -108,7 +127,7 @@ def run_collect_phase(context, llm_client) -> None:
         if len(filtered_articles) < context.settings.search.min_articles_per_topic:
             logger.warning(
                 "COLLECT",
-                f"主题“{topic}”过滤后的有效资料仅有 {len(filtered_articles)} 篇，已继续采集并记录质量信息，不作为终止条件。",
+                f"主题“{topic}”过滤后的有效资料只有 {len(filtered_articles)} 篇，但本轮继续记录质量信息，不作为终止条件。",
             )
 
         try:

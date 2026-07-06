@@ -18,8 +18,18 @@ def run_check_phase(context, llm_client) -> None:
     ensure_dir(context.paths.check / "data")
 
     input_dir = context.input_run_dir or context.paths.root
-    generation_dir = input_dir / "generate" if (input_dir / "generate").exists() else input_dir
-    collect_dir = input_dir / "collect" if (input_dir / "collect").exists() else input_dir
+    if (input_dir / "3_generate").exists():
+        generation_dir = input_dir / "3_generate"
+    elif (input_dir / "generate").exists():
+        generation_dir = input_dir / "generate"
+    else:
+        generation_dir = input_dir
+    if (input_dir / "1_collect").exists():
+        collect_dir = input_dir / "1_collect"
+    elif (input_dir / "collect").exists():
+        collect_dir = input_dir / "collect"
+    else:
+        collect_dir = input_dir
     generation_metadata = load_json(generation_dir / "data" / "generation_metadata.json", default={})
     template_profiles = load_json(collect_dir / "data" / "template_style_profiles.json", default={})
 
@@ -28,8 +38,8 @@ def run_check_phase(context, llm_client) -> None:
         context.action_manager.require_and_raise(
             phase="CHECK",
             topic="检查阶段",
-            problem="未找到 generation_metadata.json 或其中没有文章数据。",
-            attempted_actions=["读取输入目录中的 generate/data/generation_metadata.json"],
+            problem="未找到 generation_metadata.json，无法继续检查与修复。",
+            attempted_actions=["读取输入目录中的 3_generate/data/generation_metadata.json"],
             cannot_continue_reason="缺少 generate 阶段结果，无法继续检查和修复。",
             user_actions=["请先运行 python main.py --phase generate。"],
             suggested_materials=["generate 阶段输出目录"],
@@ -57,39 +67,18 @@ def run_check_phase(context, llm_client) -> None:
             "template_paths": profile.get("template_paths", []),
             "word_count": article.get("word_count", 0),
         }
-        structure_result = structure_checker.check(article, profile)
-        language_result = language_checker.check(article, profile)
-        similarity_result = similarity_checker.check(article, profile)
-        compliance_result = compliance_checker.check(article)
-        result.update(
-            {
-                "structure": structure_result,
-                "language": language_result,
-                "similarity": similarity_result,
-                "compliance": compliance_result,
-            }
-        )
+        result["structure"] = structure_checker.check(article, profile)
+        result["language"] = language_checker.check(article, profile)
+        result["similarity"] = similarity_checker.check(article, profile)
+        result["compliance"] = compliance_checker.check(article)
         rewritten = rewriter.rewrite_if_needed(article, result)
         if rewritten is not None:
             article = rewritten
             result["rewritten"] = True
-            structure_result = structure_checker.check(article, profile)
-            language_result = language_checker.check(article, profile)
-            similarity_result = similarity_checker.check(article, profile)
-            compliance_result = compliance_checker.check(article)
-            result.update(
-                {
-                    "structure": structure_result,
-                    "language": language_result,
-                    "similarity": similarity_result,
-                    "compliance": compliance_result,
-                    "post_fix_scores": {
-                        "structure": structure_result["score"],
-                        "language": language_result["score"],
-                        "overall_similarity": similarity_result["overall_similarity"],
-                    },
-                }
-            )
+            result["structure"] = structure_checker.check(article, profile)
+            result["language"] = language_checker.check(article, profile)
+            result["similarity"] = similarity_checker.check(article, profile)
+            result["compliance"] = compliance_checker.check(article)
         else:
             result["rewritten"] = False
         final_output_path = final_writer.write(article, file_suffix="_最终文章")

@@ -14,7 +14,7 @@ def _load_document_module():
         from docx.shared import Pt  # type: ignore
     except ImportError as exc:  # pragma: no cover - depends on environment
         raise DocxDependencyError(
-            "缺少 python-docx 依赖，无法读写 docx。请执行 pip install -r requirements.txt。"
+            "缺少 python-docx 依赖，无法读取或写入 docx。请执行 pip install -r requirements.txt。"
         ) from exc
     return Document, Pt
 
@@ -69,10 +69,7 @@ def _write_paragraph(doc, text: str) -> None:
 
 
 def _add_list_item(doc, text: str) -> None:
-    if re.match(r"^\d+[.、]\s*", text):
-        paragraph = doc.add_paragraph(style="List Number")
-    else:
-        paragraph = doc.add_paragraph(style="List Bullet")
+    paragraph = doc.add_paragraph(style="List Number" if re.match(r"^\d+[\.\、\)]\s*", text) else "List Bullet")
     _write_inline_text(paragraph, _strip_markdown(text))
 
 

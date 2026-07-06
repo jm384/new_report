@@ -18,8 +18,8 @@ from src.common.logger import RunLogger
 class RunPaths:
     root: Path
     collect: Path
-    generate: Path
     check: Path
+    generate: Path
     topic_research_docs: Path
     generated_blog_articles: Path
     final_articles: Path
@@ -60,21 +60,40 @@ class RunContext:
         self.created_files.append(path)
 
 
-def resolve_input_run_dir(
-    project_root: Path, phase: str, input_run_dir_value: str
-) -> Path | None:
+def _normalize_run_dir(project_root: Path, value: Path) -> Path:
+    path = value if value.is_absolute() else project_root / value
+    parts = path.parts
+    if path.name in {"1_collect", "2_check", "3_generate"}:
+        return path.parent
+    if len(parts) >= 2 and parts[-2] == "outputs" and path.name.startswith(("output_", "run_")):
+        return path
+    if path.parent.name.startswith("output_") or path.parent.name.startswith("run_"):
+        return path.parent
+    return path
+
+
+def resolve_input_run_dir(project_root: Path, phase: str, input_run_dir_value: str) -> Path | None:
     if phase not in {"generate", "check"}:
         return None
     if input_run_dir_value:
-        path = Path(input_run_dir_value)
-        if not path.is_absolute():
-            path = project_root / input_run_dir_value
-        return path
+        return _normalize_run_dir(project_root, Path(input_run_dir_value))
     if phase == "generate":
+        resolved = find_latest_run_dir_with_marker(
+            project_root / "outputs",
+            Path("1_collect/data/selected_topics.json"),
+        )
+        if resolved is not None:
+            return resolved
         return find_latest_run_dir_with_marker(
             project_root / "outputs",
             Path("collect/data/selected_topics.json"),
         )
+    resolved = find_latest_run_dir_with_marker(
+        project_root / "outputs",
+        Path("3_generate/data/generation_metadata.json"),
+    )
+    if resolved is not None:
+        return resolved
     return find_latest_run_dir_with_marker(
         project_root / "outputs",
         Path("generate/data/generation_metadata.json"),
@@ -93,17 +112,18 @@ def create_run_context(
         run_id = timestamp_for_run()
         run_root = ensure_dir(project_root / "outputs" / f"output_{run_id}")
     else:
-        run_root = Path(input_run_dir)
+        run_root = _normalize_run_dir(project_root, input_run_dir)
         run_id = run_root.name.replace("output_", "").replace("run_", "")
         ensure_dir(run_root)
-    collect_root = run_root / "collect"
-    generate_root = run_root / "generate"
-    check_root = run_root / "check"
+
+    collect_root = run_root / "1_collect"
+    check_root = run_root / "2_check"
+    generate_root = run_root / "3_generate"
     paths = RunPaths(
         root=run_root,
         collect=collect_root,
-        generate=generate_root,
         check=check_root,
+        generate=generate_root,
         topic_research_docs=collect_root / "topic_research_docs",
         generated_blog_articles=generate_root / "generated_blog_articles",
         final_articles=check_root / "final_articles",
