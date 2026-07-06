@@ -27,9 +27,11 @@ def write_sections_docx(path: Path, title: str, sections: list[tuple[str, list[s
     _configure_document_styles(doc, Pt, qn)
     title_paragraph = doc.add_heading(title, level=0)
     title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _format_paragraph_runs(title_paragraph, "Microsoft YaHei", Pt(18), qn, bold=True)
     for heading, paragraphs in sections:
         heading_paragraph = doc.add_heading(heading, level=1)
         heading_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _format_paragraph_runs(heading_paragraph, "Microsoft YaHei", Pt(15), qn, bold=True)
         for paragraph in paragraphs:
             _write_paragraph(doc, paragraph)
     doc.save(path)
@@ -41,6 +43,7 @@ def write_article_docx(path: Path, title: str, blocks: list[dict[str, str]]) -> 
     _configure_document_styles(doc, Pt, qn)
     title_paragraph = doc.add_heading(title, level=0)
     title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _format_paragraph_runs(title_paragraph, "Microsoft YaHei", Pt(18), qn, bold=True)
     for block in blocks:
         kind = block.get("type", "paragraph")
         text = block.get("text", "").strip()
@@ -49,9 +52,11 @@ def write_article_docx(path: Path, title: str, blocks: list[dict[str, str]]) -> 
         if kind == "heading":
             heading_paragraph = doc.add_heading(_strip_markdown(text), level=1)
             heading_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            _format_paragraph_runs(heading_paragraph, "Microsoft YaHei", Pt(15), qn, bold=True)
         elif kind == "subheading":
             subheading_paragraph = doc.add_heading(_strip_markdown(text), level=2)
             subheading_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            _format_paragraph_runs(subheading_paragraph, "Microsoft YaHei", Pt(13), qn, bold=True)
         elif kind == "list":
             _add_list_item(doc, text)
         else:
@@ -105,6 +110,19 @@ def _apply_style_font(style, font_name: str, font_size, qn, *, bold: bool = Fals
     style.font.bold = bold
     if style.element.rPr is not None:
         style.element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
+
+
+def _format_paragraph_runs(paragraph, font_name: str, font_size, qn, *, bold: bool = False) -> None:
+    if not paragraph.runs:
+        run = paragraph.add_run(paragraph.text)
+        paragraph.text = ""
+    for run in paragraph.runs:
+        run.font.name = font_name
+        run.font.size = font_size
+        run.font.bold = bold
+        if run._element.rPr is None:
+            run._element.get_or_add_rPr()
+        run._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
 
 
 def _write_paragraph(doc, text: str) -> None:
