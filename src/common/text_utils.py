@@ -100,3 +100,91 @@ def top_terms(text: str, limit: int = 12) -> list[str]:
     tokens = re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z]{3,}", text.lower())
     counts = Counter(tokens)
     return [term for term, _ in counts.most_common(limit)]
+
+
+def extract_informative_paragraphs(
+    text: str,
+    *,
+    limit: int = 4,
+    max_chars: int = 1800,
+    topic_terms: list[str] | None = None,
+) -> list[str]:
+    paragraphs = split_paragraphs(text)
+    if not paragraphs:
+        return []
+
+    topic_terms = [term.lower() for term in (topic_terms or []) if term]
+    scored: list[tuple[int, int, str]] = []
+    for index, paragraph in enumerate(paragraphs):
+        if len(paragraph) < 40:
+            continue
+        score = _paragraph_score(paragraph, topic_terms)
+        scored.append((score, index, paragraph))
+
+    if not scored:
+        return paragraphs[:limit]
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    selected: list[tuple[int, str]] = []
+    total_chars = 0
+    for _, index, paragraph in scored:
+        if len(selected) >= limit:
+            break
+        if total_chars >= max_chars:
+            break
+        remaining = max_chars - total_chars
+        snippet = paragraph[:remaining].strip()
+        if not snippet:
+            continue
+        if len(paragraph) > remaining and remaining > 30:
+            snippet = snippet.rstrip("，,；;：:。.") + "..."
+        selected.append((index, snippet))
+        total_chars += len(snippet)
+
+    selected.sort(key=lambda item: item[0])
+    return [paragraph for _, paragraph in selected]
+
+
+def _paragraph_score(paragraph: str, topic_terms: list[str]) -> int:
+    lowered = paragraph.lower()
+    score = min(len(paragraph), 420)
+
+    for term in topic_terms:
+        if term and term in lowered:
+            score += 80
+
+    signal_markers = [
+        "责任",
+        "保险",
+        "规定",
+        "要求",
+        "申请",
+        "报告",
+        "赔偿",
+        "受伤",
+        "事故",
+        "维护",
+        "安全",
+        "law",
+        "code",
+        "rule",
+        "must",
+        "required",
+        "liability",
+        "injury",
+        "claim",
+        "insurance",
+        "sidewalk",
+        "construction",
+    ]
+    for marker in signal_markers:
+        if marker in lowered:
+            score += 20
+
+    if re.search(r"\d", paragraph):
+        score += 25
+    if "http" in lowered:
+        score -= 120
+    if len(paragraph) > 900:
+        score -= 60
+    return score

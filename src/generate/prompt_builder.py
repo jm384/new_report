@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.common.text_utils import extract_informative_paragraphs
+
 
 class PromptBuilder:
     def build_blog_prompt(
@@ -11,12 +13,14 @@ class PromptBuilder:
         target_words: int,
     ) -> str:
         source_summaries = []
-        for index, source in enumerate(sources[:8], start=1):
+        topic_terms = self._topic_terms(topic)
+        for index, source in enumerate(sources[:6], start=1):
+            content_focus = self._content_focus(source, topic_terms)
             source_summaries.append(
                 f"{index}. 标题：{source.get('title', '')}\n"
                 f"   链接：{source.get('url', '')}\n"
                 f"   中文概要：{source.get('summary_zh', '') or source.get('summary', '')}\n"
-                f"   正文片段：{source.get('content', '')[:900]}"
+                f"   正文重点：\n{content_focus}"
             )
         source_text = "\n".join(source_summaries) or "无可用来源。"
         common_terms = "、".join(style_profile.get("common_terms", [])[:12])
@@ -39,6 +43,7 @@ class PromptBuilder:
 8. 涉及责任、保险、法律规则时要保守准确，不要绝对化承诺。
 9. “温和提醒”“古灵王律师团寄语”如果要出现，只能放在文章结尾的小节里，不能作为文章标题。
 10. 如果现有信息有限，可以补足背景解释，但不要编造具体案件事实。
+11. 优先使用“正文重点”里的具体信息来展开，不要只围着概要改写。
 
 风格参考：
 - 结构：{style_profile.get('structure_summary', '')}
@@ -48,3 +53,27 @@ class PromptBuilder:
 参考资料：
 {source_text}
 """.strip()
+
+    def _content_focus(self, source: dict, topic_terms: list[str]) -> str:
+        content = source.get("content", "") or ""
+        paragraphs = extract_informative_paragraphs(
+            content,
+            limit=4,
+            max_chars=1600,
+            topic_terms=topic_terms,
+        )
+        if not paragraphs:
+            return "   - 未提取到可用正文重点。"
+        return "\n".join(f"   - {paragraph}" for paragraph in paragraphs)
+
+    def _topic_terms(self, topic: str) -> list[str]:
+        raw_terms = []
+        separators = ["：", "，", "、", " ", ":", "？", "?", "（", "）", "(", ")", "与", "和"]
+        normalized = topic
+        for separator in separators:
+            normalized = normalized.replace(separator, "|")
+        for term in normalized.split("|"):
+            cleaned = term.strip()
+            if len(cleaned) >= 2:
+                raw_terms.append(cleaned)
+        return list(dict.fromkeys(raw_terms))
