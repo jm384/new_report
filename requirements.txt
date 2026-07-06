@@ -1,0 +1,14 @@
+requests
+beautifulsoup4
+lxml
+python-docx
+readability-lxml
+trafilatura
+feedparser
+python-dotenv
+scikit-learn
+numpy
+jieba
+duckduckgo_search
+ddgs
+openai
